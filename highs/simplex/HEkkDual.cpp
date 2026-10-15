@@ -2973,6 +2973,7 @@ HighsDebugStatus HEkkDual::debugDualSimplex(const std::string& message,
 }
 
 bool HEkkDual::isBadBasisChange() {
+  ekk_instance_.setCyclingObjective(SimplexAlgorithm::kDual, solve_phase);
   return ekk_instance_.isBadBasisChange(SimplexAlgorithm::kDual, variable_in,
                                         row_out, rebuild_reason);
 }

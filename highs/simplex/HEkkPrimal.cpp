@@ -1423,6 +1423,11 @@ void HEkkPrimal::update() {
   // Perform update operations that are independent of phase
   HighsSimplexInfo& info = ekk_instance_.info_;
   assert(!rebuild_reason);
+  // Accumulate the change in the objective of this phase, so that
+  // cycling detection can tell whether it has changed since a basis
+  // was visited
+  ekk_instance_.cycling_objective_value_ +=
+      info.workDual_[variable_in] * theta_primal;
   bool flipped = row_out < 0;
   if (flipped) {
     variable_out = variable_in;
@@ -2979,6 +2984,7 @@ HighsDebugStatus HEkkPrimal::debugPrimalSteepestEdgeWeights(
 }
 
 bool HEkkPrimal::isBadBasisChange() {
+  ekk_instance_.setCyclingObjective(SimplexAlgorithm::kPrimal, solve_phase);
   return ekk_instance_.isBadBasisChange(SimplexAlgorithm::kPrimal, variable_in,
                                         row_out, rebuild_reason);
 }

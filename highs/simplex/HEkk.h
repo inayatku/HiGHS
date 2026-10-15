@@ -36,6 +36,8 @@ class HEkk {
         dual_simplex_cleanup_level_(0),
         dual_simplex_phase1_cleanup_level_(0),
         previous_iteration_cycling_detected(-kHighsIInf),
+        cycling_objective_id_(kCyclingObjectiveUnknown),
+        cycling_objective_value_(0.0),
         solve_bailout_(false),
         called_return_from_solve_(false),
         exit_algorithm_(SimplexAlgorithm::kNone),
@@ -185,7 +187,9 @@ class HEkk {
   HighsSimplexInfo info_;
   HighsModelStatus model_status_;
   SimplexBasis basis_;
-  HighsHashTable<uint64_t> visited_basis_;
+  // For each basis visited, the identifier and value of the objective
+  // at the visit (see isBadBasisChange)
+  HighsHashTable<uint64_t, std::pair<HighsInt, double>> visited_basis_;
   HighsRandom random_;
   std::vector<double> dual_edge_weight_;
   std::vector<double> scattered_dual_edge_weight_;
@@ -207,6 +211,12 @@ class HEkk {
   HighsInt dual_simplex_phase1_cleanup_level_;
 
   HighsInt previous_iteration_cycling_detected;
+
+  // Identifier of the objective being optimized (algorithm and solve
+  // phase) and its current value, used when detecting cycling. In
+  // primal simplex the value is the accumulated objective change
+  HighsInt cycling_objective_id_;
+  double cycling_objective_value_;
 
   bool solve_bailout_;
   bool called_return_from_solve_;
@@ -328,6 +338,9 @@ class HEkk {
 
   void updatePivots(const HighsInt variable_in, const HighsInt row_out,
                     const HighsInt move_out);
+  void setCyclingObjective(const SimplexAlgorithm algorithm,
+                           const HighsInt solve_phase);
+  void resetCyclingObjective();
   bool isBadBasisChange(const SimplexAlgorithm algorithm,
                         const HighsInt variable_in, const HighsInt row_out,
                         const HighsInt rebuild_reason);

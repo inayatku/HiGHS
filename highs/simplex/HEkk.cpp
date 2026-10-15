@@ -134,6 +134,7 @@ void HEkk::clearEkkData() {
   this->dual_simplex_phase1_cleanup_level_ = 0;
 
   this->previous_iteration_cycling_detected = -kHighsIInf;
+  this->resetCyclingObjective();
 
   this->solve_bailout_ = false;
   this->called_return_from_solve_ = false;
@@ -1631,8 +1632,9 @@ void HEkk::initialiseForSolve() {
 
   bool primal_feasible = info_.num_primal_infeasibilities == 0;
   bool dual_feasible = info_.num_dual_infeasibilities == 0;
+  resetCyclingObjective();
   visited_basis_.clear();
-  visited_basis_.insert(basis_.hash);
+  visited_basis_[basis_.hash] = {kCyclingObjectiveUnknown, 0.0};
   model_status_ = HighsModelStatus::kNotset;
   if (primal_feasible && dual_feasible)
     model_status_ = HighsModelStatus::kOptimal;
@@ -1858,8 +1860,9 @@ bool HEkk::getNonsingularInverse(const HighsInt solve_phase) {
     // Record that backtracking is taking place
     info_.backtracking_ = true;
     visited_basis_.clear();
-    visited_basis_.insert(basis_.hash);
-    visited_basis_.insert(deficient_hash);
+    visited_basis_[basis_.hash] = {kCyclingObjectiveUnknown, 0.0};
+    // Returning to the rank deficient basis is always bad
+    visited_basis_[deficient_hash] = {kCyclingObjectiveAny, 0.0};
     this->updateStatus(LpAction::kBacktracking);
     HighsInt backtrack_rank_deficiency = computeFactor();
     // This basis has previously been inverted successfully, so it shouldn't be
@@ -3106,7 +3109,12 @@ void HEkk::updatePivots(const HighsInt variable_in, const HighsInt row_out,
   // update hash value of basis
   HighsHashHelpers::sparse_inverse_combine(basis_.hash, variable_out);
   HighsHashHelpers::sparse_combine(basis_.hash, variable_in);
-  visited_basis_.insert(basis_.hash);
+  // Record the objective at the new basis. In dual simplex, the dual
+  // objective value has already been updated for this iteration
+  if (cycling_objective_id_ >= 0 && cycling_objective_id_ % 2 == 0)
+    cycling_objective_value_ = info_.updated_dual_objective_value;
+  visited_basis_[basis_.hash] = {cycling_objective_id_,
+                                 cycling_objective_value_};
 
   // Incoming variable
   basis_.basicIndex_[row_out] = variable_in;
@@ -3145,6 +3153,28 @@ void HEkk::updatePivots(const HighsInt variable_in, const HighsInt row_out,
   analysis_.simplexTimerStop(UpdatePivotsClock);
 }
 
+void HEkk::setCyclingObjective(const SimplexAlgorithm algorithm,
+                               const HighsInt solve_phase) {
+  // The objective being optimized depends on the algorithm and the
+  // solve phase: even identifiers are for dual simplex, odd ones for
+  // primal simplex
+  const bool dual = algorithm == SimplexAlgorithm::kDual;
+  const HighsInt objective_id = 2 * solve_phase + (dual ? 0 : 1);
+  if (dual) cycling_objective_value_ = info_.updated_dual_objective_value;
+  if (objective_id != cycling_objective_id_) {
+    // Starting to optimize a different objective, so the current
+    // basis is the first to be visited with it
+    cycling_objective_id_ = objective_id;
+    visited_basis_[basis_.hash] = {cycling_objective_id_,
+                                   cycling_objective_value_};
+  }
+}
+
+void HEkk::resetCyclingObjective() {
+  cycling_objective_id_ = kCyclingObjectiveUnknown;
+  cycling_objective_value_ = 0;
+}
+
 bool HEkk::isBadBasisChange(const SimplexAlgorithm algorithm,
                             const HighsInt variable_in, const HighsInt row_out,
                             const HighsInt rebuild_reason) {
@@ -3157,7 +3187,26 @@ bool HEkk::isBadBasisChange(const SimplexAlgorithm algorithm,
   HighsHashHelpers::sparse_combine(currhash, variable_in);
 
   bool cycling_detected = false;
-  const bool posible_cycling = visited_basis_.find(currhash) != nullptr;
+  // Returning to a basis visited earlier is only possible cycling if
+  // the objective is unchanged since that visit. For a given
+  // objective, its value is monotone over simplex iterations, so a
+  // cycle can only pass through bases with the same objective
+  // value. If the objective itself is different (another algorithm or
+  // solve phase), or its value has changed, then returning to the
+  // basis is not evidence of cycling
+  bool posible_cycling = false;
+  const std::pair<HighsInt, double>* visit = visited_basis_.find(currhash);
+  if (visit) {
+    if (visit->first == kCyclingObjectiveAny) {
+      posible_cycling = true;
+    } else if (visit->first == cycling_objective_id_) {
+      const double tolerance =
+          kCyclingObjectiveRelativeTolerance *
+          std::max(1.0, std::fabs(cycling_objective_value_));
+      posible_cycling =
+          std::fabs(visit->second - cycling_objective_value_) <= tolerance;
+    }
+  }
   if (posible_cycling) {
     if (iteration_count_ == previous_iteration_cycling_detected + 1) {
       // Cycling detected on successive iterations suggests infinite cycling

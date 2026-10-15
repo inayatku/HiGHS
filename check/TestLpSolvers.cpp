@@ -602,3 +602,63 @@ TEST_CASE("issue-2300", "[highs_lp_solver]") {
 
   h.resetGlobalScheduler(true);
 }
+
+TEST_CASE("issue-3289", "[highs_lp_solver]") {
+  // Bases visited in dual phase 1 are revisited in dual phase 2,
+  // where the objective is different, so this is not cycling
+  std::string model_file =
+      std::string(HIGHS_DIR) + "/check/instances/issue-3289.mps";
+  Highs h;
+  h.setOptionValue("output_flag", dev_run);
+  if (dev_run) h.setOptionValue("log_dev_level", 1);
+  h.setOptionValue("solver", kSimplexString);
+  h.setOptionValue("simplex_strategy", kSimplexStrategyDualPlain);
+  h.setOptionValue("simplex_scale_strategy", 1);
+  h.setOptionValue("presolve", kHighsOffString);
+  h.setOptionValue("primal_feasibility_tolerance", 1e-10);
+  h.setOptionValue("dual_feasibility_tolerance", 1e-10);
+  // Matrix entries of order 1e-17 (cosines of multiples of pi/2) are
+  // dropped, with a warning
+  REQUIRE(h.readModel(model_file) == HighsStatus::kWarning);
+  REQUIRE(h.run() == HighsStatus::kOk);
+  REQUIRE(h.getModelStatus() == HighsModelStatus::kOptimal);
+  const double optimal_objective = -0.53164328324541;
+  REQUIRE(std::fabs(h.getInfo().objective_function_value - optimal_objective) <
+          1e-10);
+
+  h.resetGlobalScheduler(true);
+}
+
+TEST_CASE("issue-3394-infeasible", "[highs_lp_solver]") {
+  // In primal phase 1 a basis is revisited after the sum of
+  // infeasibilities has decreased, so this is not cycling
+  std::string model_file =
+      std::string(HIGHS_DIR) + "/check/instances/issue-3394-infeasible.mps";
+  Highs h;
+  h.setOptionValue("output_flag", dev_run);
+  if (dev_run) h.setOptionValue("log_dev_level", 1);
+  REQUIRE(h.readModel(model_file) == HighsStatus::kOk);
+  REQUIRE(h.run() == HighsStatus::kOk);
+  REQUIRE(h.getModelStatus() == HighsModelStatus::kInfeasible);
+
+  h.resetGlobalScheduler(true);
+}
+
+TEST_CASE("issue-3394-unbounded", "[highs_lp_solver]") {
+  // From this basis, dual simplex finds the LP to be dual infeasible
+  // and primal simplex then revisits a basis visited by dual simplex,
+  // where the objective was different, so this is not cycling
+  std::string model_file =
+      std::string(HIGHS_DIR) + "/check/instances/issue-3394-unbounded.mps";
+  std::string basis_file =
+      std::string(HIGHS_DIR) + "/check/instances/issue-3394-unbounded.bas";
+  Highs h;
+  h.setOptionValue("output_flag", dev_run);
+  if (dev_run) h.setOptionValue("log_dev_level", 1);
+  REQUIRE(h.readModel(model_file) == HighsStatus::kOk);
+  REQUIRE(h.readBasis(basis_file) == HighsStatus::kOk);
+  REQUIRE(h.run() == HighsStatus::kOk);
+  REQUIRE(h.getModelStatus() == HighsModelStatus::kUnbounded);
+
+  h.resetGlobalScheduler(true);
+}

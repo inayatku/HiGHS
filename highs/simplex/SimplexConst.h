@@ -198,6 +198,16 @@ enum class BadBasisChangeReason {
 const HighsInt kAllowedNumBadDevexWeight = 3;
 const double kBadDevexWeightFactor = 3;
 
+// Objective identifiers recorded with visited bases when detecting
+// cycling: a basis recorded with an unknown objective is not
+// evidence of cycling when revisited, and a basis recorded with "any"
+// objective always is
+const HighsInt kCyclingObjectiveUnknown = -1;
+const HighsInt kCyclingObjectiveAny = -2;
+// Relative tolerance on the change in objective value since a basis
+// was visited, below which revisiting it may be cycling
+const double kCyclingObjectiveRelativeTolerance = 1e-9;
+
 //
 // Relation between HiGHS basis and Simplex basis
 //
